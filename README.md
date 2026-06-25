@@ -5,7 +5,7 @@ Multi-task deep learning system that estimates food waste in grams from before/a
 > **Automated Food Leftover Estimation Using Deep Learning**  
 > https://doi.org/10.1371/journal.pone.0320426
 
-Dataset: **LeFoodSet** -- 678 samples, 34 Indonesian hospital cafeteria food categories.
+Dataset: **LeFoodSet** -- 524 usable samples across 34 food categories (678 rows in Excel; 154 lack segmented images and are skipped automatically).
 
 ---
 
@@ -79,7 +79,7 @@ food-waste-estimation/
 
 | Property | Value |
 |---|---|
-| Samples | 678 |
+| Samples | 524 usable (678 in Excel, 154 skipped -- no segmented images) |
 | Categories | 34 Indonesian foods |
 | Input | Segmented images (black background, `data/segmented/`) |
 | Metadata | `data/data_original.xlsx` |
@@ -94,19 +94,26 @@ The visual score column (1-7) in the metadata is a human observer rating and is 
 
 ## Setup
 
+The code runs identically in both environments once dependencies are installed.
+
+### Local (uv)
+
+[uv](https://docs.astral.sh/uv/) is the package manager for local development.
+
 ```bash
-pip install torch torchvision timm pandas openpyxl scikit-learn matplotlib seaborn
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install all dependencies into a managed virtual environment
+uv sync
+
+# Run scripts inside the environment
+uv run python src/train.py --folds 10 --epochs 100 --lr 0.0001 --batch_size 16
 ```
-
-The code runs identically in both environments:
-
-### Local
-
-Run commands from the project root. Checkpoints save to `checkpoints/`.
 
 ### Google Colab
 
-The entire project folder is stored on Google Drive. Before running any code, mount Drive and set the working directory to the project folder:
+The entire project folder is stored on Google Drive. Before running any code, mount Drive, set the working directory, and install dependencies with pip:
 
 ```python
 from google.colab import drive
@@ -114,6 +121,8 @@ drive.mount('/content/drive')
 
 import os
 os.chdir('/content/drive/MyDrive/food-waste-estimation')  # adjust to your folder name
+
+!pip install -r requirements.txt
 ```
 
 After that, all relative paths (`data/`, `checkpoints/`, `results/`, `src/`) resolve correctly, and checkpoints are automatically persisted to Drive without any extra configuration.
@@ -122,6 +131,12 @@ After that, all relative paths (`data/`, `checkpoints/`, `results/`, `src/`) res
 
 ## Training
 
+Local (uv):
+```bash
+uv run python src/train.py --folds 10 --epochs 100 --lr 0.0001 --batch_size 16
+```
+
+Colab:
 ```bash
 python src/train.py --folds 10 --epochs 100 --lr 0.0001 --batch_size 16
 ```
@@ -152,6 +167,15 @@ Both streams receive the **same** random augmentation each sample:
 
 ## Inference
 
+Local (uv):
+```bash
+uv run python src/inference.py \
+  --before path/to/before.jpg \
+  --after  path/to/after.jpg \
+  --checkpoint checkpoints/best_fold_1.pth
+```
+
+Colab:
 ```bash
 python src/inference.py \
   --before path/to/before.jpg \

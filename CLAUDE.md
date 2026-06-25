@@ -35,7 +35,7 @@ food-waste-estimation/
 
 ## Dataset
 
-- **678 samples**, 34 Indonesian food categories
+- **524 usable samples** (678 in Excel, 154 lack segmented images and are skipped automatically), 34 food categories with complete image data
 - Each sample: before image + after image (both raw and segmented versions)
 - Metadata in `data_original.xlsx` with columns: ID, Name of the food, Image Before Eaten, Weight Before Eaten (g), Image After Eaten, Weight After Eaten (g), Visual Estimation by Observer (1-7)
 - **Target label**: `Weight Leftover (g) = Weight Before Eaten (g) - Weight After Eaten (g)`, normalized to 0.0-1.0
@@ -103,6 +103,14 @@ Dual-stream CNN with late fusion (per paper methodology):
 
 ---
 
+## Environment Rules
+
+- Local development uses `uv` as the package manager (`uv sync`, `uv run python ...`)
+- Google Colab uses `pip install -r requirements.txt` (uv is not pre-installed in Colab)
+- `pyproject.toml` is the source of truth for dependencies; `requirements.txt` mirrors it for Colab
+
+---
+
 ## Key Rules
 
 - ALWAYS use segmented images as input, not raw images
@@ -118,10 +126,13 @@ Dual-stream CNN with late fusion (per paper methodology):
 ## Commands
 
 ```bash
-# Install dependencies
-pip install torch torchvision timm pandas openpyxl scikit-learn matplotlib seaborn
+# Install dependencies (local -- uses uv)
+uv sync
 
-# Run training (local or Colab -- set working directory to project root first)
+# Install dependencies (Google Colab -- uses pip)
+pip install -r requirements.txt
+
+# Run training (set working directory to project root first)
 python src/train.py --folds 10 --epochs 100 --lr 0.0001 --batch_size 16
 
 # Run inference on a single pair
@@ -134,4 +145,4 @@ python src/inference.py --before path/to/before.jpg --after path/to/after.jpg --
 
 - Rice and rice porridge are the hardest cases, white food on white plate confuses the model
 - Oily/saucy dishes cause false positives, model detects oil as food waste
-- Dataset is imbalanced: Nasi (rice) ~78 samples, Tim ~76 samples, others 20-28 each
+- Dataset is severely imbalanced: Nasi ~78 samples, Tim ~76, down to 1-2 samples for rare categories (Bubur, Telur orak arik, Tahu goreng)
