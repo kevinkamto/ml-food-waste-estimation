@@ -3,23 +3,49 @@ Automatic segmentation of raw food plate images into the ground-truth format:
   black background | pure white plate area | food at original colors
 
 Two-stage algorithm:
-  Stage 1 -- GrabCut + convex hull: detect the plate boundary
-  Stage 2 -- HSV threshold within hull: plate surface -> white, food -> original colors
+  Stage 1 -- SAM ViT-B: center-point + corner-background prompts identify the plate region
+  Stage 2 -- HSV + texture within mask: plate surface -> white, food -> original colors
 """
 
 import argparse
 import os
+import urllib.request
+from pathlib import Path
 
 import cv2
 import numpy as np
+import torch
 from PIL import Image
+from segment_anything import SamPredictor, sam_model_registry
 from tqdm import tqdm
 
 _OUT_SIZE = 800
-_GRABCUT_RECT_INSET = 0.10
-_CLOSE_KERNEL = 30
+_CLOSE_KERNEL = 30  # morphological closing after SAM mask to fill small gaps
 _PLATE_SAT_MAX = 40
 _PLATE_VAL_MIN = 150
+_PLATE_TEX_MAX = 12
+
+_SAM_MODEL_TYPE = "vit_b"
+_SAM_CHECKPOINT_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+_SAM_CHECKPOINT_PATH = Path.home() / ".cache" / "segment_anything" / "sam_vit_b_01ec64.pth"
+
+_sam_predictor: SamPredictor | None = None
+
+
+def _get_sam_predictor() -> SamPredictor:
+    """Lazy-load SAM ViT-B predictor, downloading the checkpoint on first use (~375 MB)."""
+    global _sam_predictor
+    if _sam_predictor is None:
+        if not _SAM_CHECKPOINT_PATH.exists():
+            _SAM_CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            print(f"Downloading SAM checkpoint (~375 MB) to {_SAM_CHECKPOINT_PATH} ...")
+            urllib.request.urlretrieve(_SAM_CHECKPOINT_URL, str(_SAM_CHECKPOINT_PATH))
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        sam = sam_model_registry[_SAM_MODEL_TYPE](checkpoint=str(_SAM_CHECKPOINT_PATH))
+        sam.to(device)
+        sam.eval()
+        _sam_predictor = SamPredictor(sam)
+    return _sam_predictor
 
 
 def segment_image(input_path: str, output_path: str | None = None) -> Image.Image:
@@ -27,9 +53,9 @@ def segment_image(input_path: str, output_path: str | None = None) -> Image.Imag
     Segment a raw food plate image into the standard 3-region format.
 
     Returns an 800x800 RGB PIL Image:
-      - background (outside plate hull) -> black (0, 0, 0)
-      - plate surface (inside hull, low saturation / high brightness) -> white (255, 255, 255)
-      - food (inside hull, colored or textured) -> original pixel colors
+      - background (outside plate) -> black (0, 0, 0)
+      - plate surface (inside mask, low saturation / high brightness) -> white (255, 255, 255)
+      - food (inside mask, colored or textured) -> original pixel colors
 
     Args:
         input_path: Path to the raw input image (JPG/PNG).
@@ -42,7 +68,7 @@ def segment_image(input_path: str, output_path: str | None = None) -> Image.Imag
     bgr_sq = _pad_to_square(bgr)
     bgr_800 = cv2.resize(bgr_sq, (_OUT_SIZE, _OUT_SIZE), interpolation=cv2.INTER_LINEAR)
 
-    plate_mask = _detect_plate_hull(bgr_800)
+    plate_mask = _detect_plate_sam(bgr_800)
     result_bgr = _normalize_plate(bgr_800, plate_mask)
 
     rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
@@ -66,55 +92,67 @@ def _pad_to_square(bgr: np.ndarray) -> np.ndarray:
     return canvas
 
 
-def _detect_plate_hull(bgr: np.ndarray) -> np.ndarray:
+def _detect_plate_sam(bgr: np.ndarray) -> np.ndarray:
     """
-    Stage 1: GrabCut with center-biased rect, then convex hull of the largest contour.
-    Returns a binary uint8 mask (255 inside hull, 0 outside), same size as bgr.
+    Stage 1: SAM ViT-B with center-point + corner-background prompts.
+
+    Foreground prompt: center of frame (plate is always centered, fixed camera).
+    Background prompts: four corners (always the checkered mat background).
+    Returns a binary uint8 mask (255 = plate+food, 0 = background), same HxW as bgr.
     """
     h, w = bgr.shape[:2]
-    inset = int(min(h, w) * _GRABCUT_RECT_INSET)
-    rect = (inset, inset, w - 2 * inset, h - 2 * inset)
+    margin = min(h, w) // 10
 
-    gc_mask = np.zeros((h, w), dtype=np.uint8)
-    bgd_model = np.zeros((1, 65), dtype=np.float64)
-    fgd_model = np.zeros((1, 65), dtype=np.float64)
-    cv2.grabCut(bgr, gc_mask, rect, bgd_model, fgd_model, 5, cv2.GC_INIT_WITH_RECT)
+    point_coords = np.array(
+        [
+            [w // 2, h // 2],  # center = foreground (plate)
+            [margin, margin],  # top-left = background
+            [w - margin, margin],  # top-right = background
+            [margin, h - margin],  # bottom-left = background
+            [w - margin, h - margin],  # bottom-right = background
+        ]
+    )
+    point_labels = np.array([1, 0, 0, 0, 0])
 
-    fg_mask = np.where(
-        (gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD),
-        np.uint8(255),
-        np.uint8(0),
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    predictor = _get_sam_predictor()
+    predictor.set_image(rgb)
+
+    masks, scores, _ = predictor.predict(
+        point_coords=point_coords,
+        point_labels=point_labels,
+        multimask_output=True,
     )
 
+    best = masks[int(np.argmax(scores))].astype(np.uint8) * 255
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (_CLOSE_KERNEL, _CLOSE_KERNEL))
-    closed = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
-
-    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return closed
-
-    largest = max(contours, key=cv2.contourArea)
-    hull = cv2.convexHull(largest)
-
-    hull_mask = np.zeros((h, w), dtype=np.uint8)
-    cv2.drawContours(hull_mask, [hull], -1, 255, thickness=cv2.FILLED)
-    return hull_mask
+    return np.asarray(cv2.morphologyEx(best, cv2.MORPH_CLOSE, kernel), dtype=np.uint8)
 
 
 def _normalize_plate(bgr: np.ndarray, plate_mask: np.ndarray) -> np.ndarray:
     """
-    Stage 2: within the plate hull, classify pixels by HSV and normalize plate surface to white.
+    Stage 2: within the plate mask, classify pixels by HSV + local texture.
 
-    Plate surface: S < _PLATE_SAT_MAX and V > _PLATE_VAL_MIN -> (255, 255, 255)
-    Food:          everything else inside the hull -> keep original BGR
-    Outside hull:  (0, 0, 0)
+    Plate surface: S < _PLATE_SAT_MAX AND V > _PLATE_VAL_MIN AND texture_std < _PLATE_TEX_MAX
+    Food:          everything else inside the mask -> keep original BGR
+    Outside mask:  (0, 0, 0)
+
+    Texture check is required to preserve white/cream foods (rice, porridge -- ~29% of dataset).
+    Rice grains have local std ~10-20; smooth plate surface has local std ~3-8.
     """
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
     s = hsv[:, :, 1]
     v = hsv[:, :, 2]
 
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    mean = cv2.blur(gray, (7, 7))
+    mean_sq = cv2.blur(gray**2, (7, 7))
+    texture_std = np.sqrt(np.clip(mean_sq - mean**2, 0, None))
+
     inside = plate_mask == 255
-    plate_surface = inside & (s < _PLATE_SAT_MAX) & (v > _PLATE_VAL_MIN)
+    plate_surface = (
+        inside & (s < _PLATE_SAT_MAX) & (v > _PLATE_VAL_MIN) & (texture_std < _PLATE_TEX_MAX)
+    )
 
     result = np.zeros_like(bgr)
     result[inside] = bgr[inside]
