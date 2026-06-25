@@ -86,9 +86,7 @@ def _detect_plate_hull(bgr: np.ndarray) -> np.ndarray:
         np.uint8(0),
     )
 
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE, (_CLOSE_KERNEL, _CLOSE_KERNEL)
-    )
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (_CLOSE_KERNEL, _CLOSE_KERNEL))
     closed = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
 
     contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -148,7 +146,9 @@ def _cli() -> None:
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--input", help="Single input image path")
-    mode.add_argument("--input_dir", help="Batch mode: directory of raw images (walked recursively)")
+    mode.add_argument(
+        "--input_dir", help="Batch mode: directory of raw images (walked recursively)"
+    )
     parser.add_argument("--output", help="Single output image path (required with --input)")
     parser.add_argument(
         "--output_dir",
