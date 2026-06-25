@@ -49,7 +49,7 @@ Both streams share EfficientNet-B0 weights (Siamese-style). Backbone is pretrain
 ## Project Structure
 
 ```
-food-waste-estimation/
+ml-food-waste-estimation/
 ├── CLAUDE.md                       # Agent instructions and project rules
 ├── SPEC.md                         # Detailed technical specification
 ├── data/
@@ -61,9 +61,9 @@ food-waste-estimation/
 │       ├── data_before/            # Segmented before images (black background)
 │       └── data_after/             # Segmented after images (black background)
 ├── notebooks/
-│   ├── EDA_LeFoodSet_Leftovers.ipynb
-│   ├── training.ipynb              # Full training pipeline (local + Colab)
-│   └── inference.ipynb             # Demo: load image pair and predict
+│   ├── LeFoodSet_Leftovers_EDA.ipynb
+│   ├── LeFoodSet_Leftovers_Training.ipynb              # Full training pipeline (local + Colab)
+│   └── LeFoodSet_Leftovers_Inference.ipynb             # Demo: load image pair and predict
 ├── src/
 │   ├── dataset.py                  # FoodWasteDataset + transforms
 │   ├── model.py                    # DualStreamEfficientNet
@@ -120,7 +120,7 @@ from google.colab import drive
 drive.mount('/content/drive')
 
 import os
-os.chdir('/content/drive/MyDrive/food-waste-estimation')  # adjust to your folder name
+os.chdir('/content/drive/MyDrive/ml-food-waste-estimation')  # adjust to your folder name
 
 !pip install -r requirements.txt
 ```
@@ -193,7 +193,7 @@ Returns:
 }
 ```
 
-Ensemble inference (all 10 folds, averaged) is available via `notebooks/inference.ipynb`.
+Ensemble inference (all 10 folds, averaged) is available via `notebooks/LeFoodSet_Leftovers_Inference.ipynb`.
 
 ---
 

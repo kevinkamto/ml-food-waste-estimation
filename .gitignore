@@ -17,6 +17,10 @@ results/*.png
 .venv/
 uv.lock
 
+# Linter / type-checker caches
+.ruff_cache/
+.mypy_cache/
+
 # Python
 __pycache__/
 *.py[cod]

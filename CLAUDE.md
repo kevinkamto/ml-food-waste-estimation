@@ -7,7 +7,7 @@ Multi-task deep learning system that estimates food waste in grams from before/a
 ## Project Structure
 
 ```
-food-waste-estimation/
+ml-food-waste-estimation/
 ├── CLAUDE.md
 ├── SPEC.md
 ├── data/
@@ -19,9 +19,9 @@ food-waste-estimation/
 │       ├── data_before/            # Ground truth segmented before images (black background)
 │       └── data_after/             # Ground truth segmented after images (black background)
 ├── notebooks/
-│   ├── EDA_LeFoodSet_Leftovers.ipynb   # Exploratory data analysis (existing)
-│   ├── training.ipynb                  # Training pipeline (to be built)
-│   └── inference.ipynb                 # Inference demo (to be built)
+│   ├── LeFoodSet_Leftovers_EDA.ipynb   # Exploratory data analysis (existing)
+│   ├── LeFoodSet_Leftovers_Training.ipynb                  # Full training pipeline (local + Colab)
+│   └── LeFoodSet_Leftovers_Inference.ipynb                 # Inference demo (single model + ensemble)
 ├── src/
 │   ├── dataset.py                  # PyTorch Dataset class
 │   ├── model.py                    # Dual-stream EfficientNet-B0 model
