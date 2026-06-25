@@ -1,3 +1,5 @@
+from typing import cast
+
 import timm
 import torch
 import torch.nn as nn
@@ -20,13 +22,11 @@ class DualStreamEfficientNet(nn.Module):
     def __init__(self, pretrained: bool = True) -> None:
         super().__init__()
 
-        self.backbone = timm.create_model(
-            "efficientnet_b0", pretrained=pretrained, num_classes=0
-        )
-        feat_dim = self.backbone.num_features  # 1280
+        self.backbone = timm.create_model("efficientnet_b0", pretrained=pretrained, num_classes=0)
+        feat_dim: int = cast(int, self.backbone.num_features)  # 1280
 
         # feat_before + feat_after + |diff| + area_ratio scalar
-        fusion_in = feat_dim * 3 + 1
+        fusion_in: int = feat_dim * 3 + 1
 
         self.fusion = nn.Sequential(
             nn.Linear(fusion_in, 1024),
@@ -52,10 +52,9 @@ class DualStreamEfficientNet(nn.Module):
         if area_ratio.dim() == 1:
             area_ratio = area_ratio.unsqueeze(1)
 
-        fused = self.fusion(
-            torch.cat([feat_before, feat_after, diff, area_ratio], dim=1)
-        )
-        return self.regression_head(fused).squeeze(1)
+        fused = self.fusion(torch.cat([feat_before, feat_after, diff, area_ratio], dim=1))
+        out: torch.Tensor = self.regression_head(fused).squeeze(1)
+        return out
 
     def freeze_backbone(self) -> None:
         for param in self.backbone.parameters():
