@@ -1,6 +1,5 @@
 import json
 import os
-import pickle
 import random as _random
 
 import numpy as np
