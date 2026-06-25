@@ -21,6 +21,9 @@ def load_metadata(xlsx_path: str, before_dir: str, after_dir: str, save_dir: str
     df = pd.read_excel(xlsx_path)
 
     df["Weight Leftover (g)"] = df["Weight Before Eaten (g)"] - df["Weight After Eaten (g)"]
+    assert (df["Weight Before Eaten (g)"] > 0).all(), (
+        "Zero or negative before-weight found in metadata"
+    )
     assert (df["Weight Leftover (g)"] >= 0).all(), "Negative leftover weights found in metadata"
 
     # Filter to rows where both segmented images exist on disk
@@ -158,9 +161,11 @@ class FoodWasteDataset(Dataset):
         before_img = Image.open(before_path).convert("RGB")
         after_img = Image.open(after_path).convert("RGB")
 
-        # Area ratio: fraction of food-covered pixels remaining
-        before_area = _pixel_area(before_path)
-        after_area = _pixel_area(after_path)
+        # Area ratio computed from already-loaded arrays to avoid a second disk read
+        before_arr = np.array(before_img)
+        after_arr = np.array(after_img)
+        before_area = float(np.any(before_arr > 0, axis=2).sum())
+        after_area = float(np.any(after_arr > 0, axis=2).sum())
         area_ratio = float(after_area / before_area) if before_area > 0 else 0.0
         area_ratio = min(area_ratio, 1.0)
 

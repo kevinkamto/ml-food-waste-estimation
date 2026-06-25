@@ -41,6 +41,10 @@ def train_fold(
     for epoch in range(1, epochs + 1):
         if epoch == 6:
             model.unfreeze_backbone()
+            # Reset LR so backbone fine-tuning starts at the full rate,
+            # not whatever the scheduler may have already reduced it to.
+            for pg in optimizer.param_groups:
+                pg["lr"] = optimizer.defaults["lr"]
 
         # Train
         model.train()

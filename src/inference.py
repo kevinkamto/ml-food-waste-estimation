@@ -12,6 +12,29 @@ from dataset import _pixel_area, get_transforms
 from model import DualStreamEfficientNet
 
 
+def _compute_area_ratio(before_path: str, after_path: str) -> float:
+    before_area = _pixel_area(before_path)
+    after_area = _pixel_area(after_path)
+    ratio = float(after_area / before_area) if before_area > 0 else 0.0
+    return min(ratio, 1.0)
+
+
+def _run_model(
+    checkpoint_path: str,
+    before_t: torch.Tensor,
+    after_t: torch.Tensor,
+    area_ratio_t: torch.Tensor,
+    device: torch.device,
+) -> float:
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model = DualStreamEfficientNet(pretrained=False)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.to(device).eval()
+    with torch.no_grad():
+        r_hat = float(model(before_t, after_t, area_ratio_t).item())
+    return r_hat
+
+
 def predict(
     before_path: str,
     after_path: str,
@@ -30,25 +53,13 @@ def predict(
     Returns dict with consumption_ratio, and optionally weight_after_grams.
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-
-    model = DualStreamEfficientNet(pretrained=False)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.to(device).eval()
-
     transform = get_transforms("val")
     before_t = transform(Image.open(before_path).convert("RGB")).unsqueeze(0).to(device)
     after_t = transform(Image.open(after_path).convert("RGB")).unsqueeze(0).to(device)
-
-    before_area = _pixel_area(before_path)
-    after_area = _pixel_area(after_path)
-    area_ratio = float(after_area / before_area) if before_area > 0 else 0.0
-    area_ratio = min(area_ratio, 1.0)
+    area_ratio = _compute_area_ratio(before_path, after_path)
     area_ratio_t = torch.tensor([[area_ratio]], dtype=torch.float32).to(device)
 
-    with torch.no_grad():
-        r_hat = float(model(before_t, after_t, area_ratio_t).item())
+    r_hat = _run_model(checkpoint_path, before_t, after_t, area_ratio_t, device)
 
     result: dict = {
         "consumption_ratio": round(r_hat, 4),
@@ -69,7 +80,16 @@ def ensemble_predict(
     weight_before_g: float | None = None,
 ) -> dict:
     """Average predictions across all checkpoint paths."""
-    ratios = [predict(before_path, after_path, cp)["consumption_ratio"] for cp in checkpoint_paths]
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    transform = get_transforms("val")
+
+    # Compute images and area_ratio once -- they are identical across all fold models
+    before_t = transform(Image.open(before_path).convert("RGB")).unsqueeze(0).to(device)
+    after_t = transform(Image.open(after_path).convert("RGB")).unsqueeze(0).to(device)
+    area_ratio = _compute_area_ratio(before_path, after_path)
+    area_ratio_t = torch.tensor([[area_ratio]], dtype=torch.float32).to(device)
+
+    ratios = [_run_model(cp, before_t, after_t, area_ratio_t, device) for cp in checkpoint_paths]
     r_mean = float(np.mean(ratios))
     r_std = float(np.std(ratios))
     result: dict = {
