@@ -4,7 +4,7 @@ import timm
 
 
 class DualStreamEfficientNet(nn.Module):
-    def __init__(self, num_classes=50, pretrained=True):
+    def __init__(self, num_classes=34, pretrained=True):
         super().__init__()
 
         self.backbone = timm.create_model('efficientnet_b0', pretrained=pretrained, num_classes=0)

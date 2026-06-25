@@ -5,7 +5,7 @@ Multi-task deep learning system that estimates food waste in grams from before/a
 > **Automated Food Leftover Estimation Using Deep Learning**  
 > https://doi.org/10.1371/journal.pone.0320426
 
-Dataset: **LeFoodSet** -- 678 samples, 50 Indonesian hospital cafeteria food categories (expanded from the paper's original 34).
+Dataset: **LeFoodSet** -- 524 usable samples across 34 food categories (678 rows in Excel; 154 lack segmented images and are skipped automatically).
 
 ---
 
@@ -35,7 +35,7 @@ After image  (3,224,224) -> EfficientNet-B0 -> feature_after  (1280,)
               +---------------------+---------------------+
               |                                           |
       Regression head                       Classification head
-  FC(1024->512) -> FC(512->1)          FC(1024->512) -> FC(512->50)
+  FC(1024->512) -> FC(512->1)          FC(1024->512) -> FC(512->34)
   Sigmoid -> leftover_norm (0-1)       Softmax -> food_category
 ```
 
@@ -79,7 +79,7 @@ food-waste-estimation/
 
 | Property | Value |
 |---|---|
-| Samples | 678 |
+| Samples | 524 usable (678 in Excel, 154 skipped -- no segmented images) |
 | Categories | 34 Indonesian foods |
 | Input | Segmented images (black background, `data/segmented/`) |
 | Metadata | `data/data_original.xlsx` |

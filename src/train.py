@@ -136,6 +136,8 @@ def main():
 
     df, norm_params, le = load_metadata(
         os.path.join(data_dir, 'data_original.xlsx'),
+        before_dir=before_dir,
+        after_dir=after_dir,
         save_dir=results_dir
     )
     label_classes = le.classes_.tolist()

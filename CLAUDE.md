@@ -35,7 +35,7 @@ food-waste-estimation/
 
 ## Dataset
 
-- **678 samples**, 50 Indonesian food categories (dataset has expanded beyond the paper's original 34)
+- **524 usable samples** (678 in Excel, 154 lack segmented images and are skipped automatically), 34 food categories with complete image data
 - Each sample: before image + after image (both raw and segmented versions)
 - Metadata in `data_original.xlsx` with columns: ID, Name of the food, Image Before Eaten, Weight Before Eaten (g), Image After Eaten, Weight After Eaten (g), Visual Estimation by Observer (1-7)
 - **Target label**: `Weight Leftover (g) = Weight Before Eaten (g) - Weight After Eaten (g)`, normalized to 0.0-1.0
@@ -53,7 +53,7 @@ Dual-stream CNN with late fusion (per paper methodology):
 - **Fusion**: Concatenate both feature vectors
 - **Multi-task heads**:
   - Regression head -> normalized leftover value (0.0-1.0), primary task
-  - Classification head -> food category (50 classes), auxiliary task
+  - Classification head -> food category (34 classes), auxiliary task
 - **Loss**: Combined loss = 0.9 x regression_loss + 0.1 x classification_loss (per paper)
 - **Optimizer**: Adam, lr=0.0001
 - **Input**: Segmented images only (NOT raw images), background already removed

@@ -12,11 +12,23 @@ from PIL import Image
 from sklearn.preprocessing import LabelEncoder
 
 
-def load_metadata(xlsx_path, save_dir='.'):
+def load_metadata(xlsx_path, before_dir, after_dir, save_dir='.'):
     df = pd.read_excel(xlsx_path)
 
     df['Weight Leftover (g)'] = df['Weight Before Eaten (g)'] - df['Weight After Eaten (g)']
     assert (df['Weight Leftover (g)'] >= 0).all(), "Negative leftover weights found in metadata"
+
+    # Filter to rows where both segmented images exist on disk
+    available_bef = {f for _, _, files in os.walk(before_dir) for f in files}
+    available_aft = {f for _, _, files in os.walk(after_dir) for f in files}
+    mask = (
+        df['Image Before Eaten'].apply(_seg_filename).isin(available_bef) &
+        df['Image After Eaten'].apply(_seg_filename).isin(available_aft)
+    )
+    n_dropped = (~mask).sum()
+    if n_dropped > 0:
+        print(f"Skipping {n_dropped} samples with missing segmented images ({mask.sum()} usable).")
+    df = df[mask].reset_index(drop=True)
 
     max_weight = float(df['Weight Before Eaten (g)'].max())
     df['leftover_normalized'] = df['Weight Leftover (g)'] / max_weight
