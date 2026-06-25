@@ -193,7 +193,7 @@ After all folds:
 
 ---
 
-## 6. Inference Pipeline (`src/inference.py` + `notebooks/inference.ipynb`)
+## 6. Inference Pipeline (`src/inference.py` + `notebooks/LeFoodSet_Leftovers_Inference.ipynb`)
 
 ### 6.1 Single Prediction
 
@@ -224,8 +224,8 @@ def predict(before_path, after_path, checkpoint_path):
 | File                                      | Description                            | Status         |
 | ----------------------------------------- | -------------------------------------- | -------------- |
 | `notebooks/EDA_LeFoodSet_Leftovers.ipynb` | Exploratory data analysis              | Exists         |
-| `notebooks/training.ipynb`                | Full training pipeline (local + Colab) | Exists         |
-| `notebooks/inference.ipynb`               | Demo: load image pair and predict      | Exists         |
+| `notebooks/LeFoodSet_Leftovers_Training.ipynb`                | Full training pipeline (local + Colab) | Exists         |
+| `notebooks/LeFoodSet_Leftovers_Inference.ipynb`               | Demo: load image pair and predict      | Exists         |
 | `src/dataset.py`                          | Dataset and transforms                 | Exists         |
 | `src/model.py`                            | Dual-stream model definition           | Exists         |
 | `src/train.py`                            | Training loop with k-fold              | Exists         |
@@ -261,8 +261,8 @@ def predict(before_path, after_path, checkpoint_path):
 
 The system is working correctly when:
 
-1. `training.ipynb` runs all 10 folds without interruption. On Colab, Drive is mounted and the working directory is set to the project folder before execution, so checkpoints persist automatically.
+1. `LeFoodSet_Leftovers_Training.ipynb` runs all 10 folds without interruption. On Colab, Drive is mounted and the working directory is set to the project folder before execution, so checkpoints persist automatically.
 2. Final mean MAE across folds is < 0.0926
 3. Food classification accuracy > 90%
-4. `inference.ipynb` accepts two image uploads and returns a predicted waste in grams within 3 seconds
+4. `LeFoodSet_Leftovers_Inference.ipynb` accepts two image uploads and returns a predicted waste in grams within 3 seconds
 5. Results are reproducible: running training twice with same seeds produces identical fold metrics

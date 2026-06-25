@@ -19,9 +19,9 @@ ml-food-waste-estimation/
 │       ├── data_before/            # Ground truth segmented before images (black background)
 │       └── data_after/             # Ground truth segmented after images (black background)
 ├── notebooks/
-│   ├── EDA_LeFoodSet_Leftovers.ipynb   # Exploratory data analysis (existing)
-│   ├── training.ipynb                  # Full training pipeline (local + Colab)
-│   └── inference.ipynb                 # Inference demo (single model + ensemble)
+│   ├── LeFoodSet_Leftovers_EDA.ipynb   # Exploratory data analysis (existing)
+│   ├── LeFoodSet_Leftovers_Training.ipynb                  # Full training pipeline (local + Colab)
+│   └── LeFoodSet_Leftovers_Inference.ipynb                 # Inference demo (single model + ensemble)
 ├── src/
 │   ├── dataset.py                  # PyTorch Dataset class
 │   ├── model.py                    # Dual-stream EfficientNet-B0 model

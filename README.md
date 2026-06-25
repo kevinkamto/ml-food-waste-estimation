@@ -61,9 +61,9 @@ ml-food-waste-estimation/
 │       ├── data_before/            # Segmented before images (black background)
 │       └── data_after/             # Segmented after images (black background)
 ├── notebooks/
-│   ├── EDA_LeFoodSet_Leftovers.ipynb
-│   ├── training.ipynb              # Full training pipeline (local + Colab)
-│   └── inference.ipynb             # Demo: load image pair and predict
+│   ├── LeFoodSet_Leftovers_EDA.ipynb
+│   ├── LeFoodSet_Leftovers_Training.ipynb              # Full training pipeline (local + Colab)
+│   └── LeFoodSet_Leftovers_Inference.ipynb             # Demo: load image pair and predict
 ├── src/
 │   ├── dataset.py                  # FoodWasteDataset + transforms
 │   ├── model.py                    # DualStreamEfficientNet
@@ -193,7 +193,7 @@ Returns:
 }
 ```
 
-Ensemble inference (all 10 folds, averaged) is available via `notebooks/inference.ipynb`.
+Ensemble inference (all 10 folds, averaged) is available via `notebooks/LeFoodSet_Leftovers_Inference.ipynb`.
 
 ---
 
