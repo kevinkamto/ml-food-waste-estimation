@@ -15,8 +15,8 @@ dependencies = [
     "loguru>=0.7.0",
 ]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "jupyter>=1.0.0",
     "ipykernel>=6.0.0",
     "ruff>=0.4.0",
