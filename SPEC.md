@@ -2,7 +2,7 @@
 
 **Project**: Multi-Task Deep Learning System for Automated Food Waste Estimation Using Dual-Stream CNN with EfficientNet-B0  
 **Reference paper**: https://doi.org/10.1371/journal.pone.0320426  
-**Dataset**: LeFoodSet -- 678 samples, 34 Indonesian food categories  
+**Dataset**: LeFoodSet -- 678 samples, 50 Indonesian food categories (expanded from the paper's original 34)  
 **Environment**: Local (CPU/GPU) and Google Colab Pro (T4 GPU). The full project folder is stored on Google Drive and mounted in Colab, so all relative paths (`data/`, `checkpoints/`, `results/`) work identically in both environments.  
 **Package manager**: `uv` for local development, `pip` for Colab.
 
@@ -29,7 +29,7 @@ Estimate the weight of food leftover (in grams) from a pair of images taken befo
 | ---------------------- | ------ | ---------- | ------------------------------- |
 | Predicted leftover     | float  | 0.0-1.0    | Normalized leftover level       |
 | Predicted leftover (g) | float  | 0-350g     | Denormalized to grams           |
-| Food category          | string | 34 classes | Predicted food type (auxiliary) |
+| Food category          | string | 50 classes | Predicted food type (auxiliary) |
 
 ### NOT required at inference
 
@@ -115,7 +115,7 @@ After image  (3,224,224) -> EfficientNet-B0 -> feature_after  (1280,)
                 +-----------------------+-----------------------+
                 |                                               |
     Regression head                             Classification head
-    FC(1024 -> 512) -> FC(512 -> 1)           FC(1024 -> 512) -> FC(512 -> 34)
+    FC(1024 -> 512) -> FC(512 -> 1)           FC(1024 -> 512) -> FC(512 -> 50)
     Sigmoid -> leftover_norm (0-1)            Softmax -> food_category
 ```
 
