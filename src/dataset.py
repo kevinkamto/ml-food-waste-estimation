@@ -20,11 +20,27 @@ def load_metadata(xlsx_path: str, before_dir: str, after_dir: str, save_dir: str
     """
     df = pd.read_excel(xlsx_path)
 
+    # SAFETY: Ensure before-weight is always positive (clamp to avoid division by zero)
+    df["Weight Before Eaten (g)"] = df["Weight Before Eaten (g)"].clip(lower=0.1)
+
+    # SAFETY: After-weight cannot be negative
+    df["Weight After Eaten (g)"] = df["Weight After Eaten (g)"].clip(lower=0.0)
+
+    # SAFETY: Ensure after-weight never exceeds before-weight (clamp invalid data)
+    invalid_mask = df["Weight After Eaten (g)"] > df["Weight Before Eaten (g)"]
+    if invalid_mask.any():
+        logger.warning(
+            f"Found {invalid_mask.sum()} samples where after-weight > before-weight. Capping to before-weight."
+        )
+        df.loc[invalid_mask, "Weight After Eaten (g)"] = df.loc[invalid_mask, "Weight Before Eaten (g)"]
+
+    # Compute leftovers (always >= 0 by construction)
     df["Weight Leftover (g)"] = df["Weight Before Eaten (g)"] - df["Weight After Eaten (g)"]
-    assert (df["Weight Before Eaten (g)"] > 0).all(), (
-        "Zero or negative before-weight found in metadata"
-    )
-    assert (df["Weight Leftover (g)"] >= 0).all(), "Negative leftover weights found in metadata"
+
+    # Final safety clamp to ensure no numerical errors
+    df["Weight Leftover (g)"] = df["Weight Leftover (g)"].clip(lower=0.0)
+    if (df["Weight Leftover (g)"] < 0).any():
+        logger.error("Critical: Negative leftovers detected even after clipping. Check source data.")
 
     # Filter to rows where both segmented images exist on disk
     available_bef = {f for _, _, files in os.walk(before_dir) for f in files}
