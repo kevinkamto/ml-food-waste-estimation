@@ -5,6 +5,12 @@ Automatic segmentation of raw food plate images into the ground-truth format:
 Two-stage algorithm:
   Stage 1 -- SAM ViT-B: center-point + corner-background prompts identify the plate region
   Stage 2 -- HSV + texture within mask: plate surface -> white, food -> original colors
+
+Debug mode writes numbered intermediate images and masks to `debug_dir`:
+  1.x: padded and resized input
+  3.x: SAM masks, prompt overlay, closed mask, shrunk mask
+  4.x: HSV/texture diagnostics and plate surface cleanup
+  5.x: final result
 """
 
 import argparse
@@ -127,6 +133,14 @@ def segment_image(
       - background (outside plate) -> black (0, 0, 0)
       - plate surface (inside mask, low saturation / high brightness) -> white (255, 255, 255)
       - food (inside mask, colored or textured) -> original pixel colors
+
+    If `debug_dir` is provided, this function saves intermediate artifacts with a
+    numbered naming scheme. The saved images document key steps:
+      - padded input, resized input
+      - SAM candidate masks and prompt overlay
+      - closed plate mask and shrunk plate mask
+      - HSV, texture, and plate surface classification maps
+      - final segmented output
 
     Args:
         input_path: Path to the raw input image (JPG/PNG).
@@ -256,6 +270,12 @@ def _detect_plate_mask(
     Foreground prompt: center of frame (plate is always centered, fixed camera).
     Background prompts: four corners (actual image corners, not padded border).
     Returns a binary uint8 mask (255 = plate+food, 0 = background), same HxW as bgr.
+
+    When debug mode is enabled, this function saves:
+      - each SAM candidate mask and overlay
+      - a prompt overlay image
+      - the closed mask after morphology
+      - the shrunk mask after erosion
     """
     h, w = bgr.shape[:2]
     if prompt_coords is None:
@@ -338,6 +358,13 @@ def _normalize_plate(
 
     Texture check is required to preserve white/cream foods (rice, porridge -- ~29% of dataset).
     Rice grains have local std ~10-20; smooth plate surface has local std ~3-8.
+
+    When debug mode is enabled, this function saves:
+      - HSV saturation and value channels
+      - gray and texture standard deviation maps
+      - the raw inside-mask and plate-condition masks
+      - plate surface classification before and after noise removal
+      - overlay of removed small plate noise dots
     """
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
     s = hsv[:, :, 1]
@@ -416,7 +443,7 @@ def _cli() -> None:
     )
     parser.add_argument(
         "--debug_dir",
-        help="Directory to write intermediate debug images and masks",
+        help="Directory to write numbered segmentation debug images and masks",
     )
     args = parser.parse_args()
 
