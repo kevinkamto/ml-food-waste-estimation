@@ -31,7 +31,7 @@ _OUT_SIZE = 800
 _MASK_CLOSE_KERNEL = 21  # morphological closing after SAM mask to fill small gaps
 _MASK_ERODE_KERNEL = 21  # morphological erosion to trim plate border from SAM mask
 _NOISE_REMOVAL_KERNEL = 21  # morphological opening to remove small plate-surface dots inside food region
-_PLATE_SAT_MAX = 15
+_PLATE_SAT_MAX = 25
 _PLATE_VAL_MIN = 150
 _PLATE_TEX_MAX = 12
 
@@ -589,7 +589,10 @@ def _batch_segment(input_dir: str, output_dir: str, debug_dir: str | None = None
         os.makedirs(debug_dir, exist_ok=True)
 
     for src in tqdm(paths, desc="Segmenting"):
-        dst = os.path.join(output_dir, os.path.basename(src))
+        rel = os.path.relpath(src, input_dir)
+        parts = rel.split(os.sep)
+        dst_name = f"{parts[0]}_{os.path.basename(src)}" if len(parts) > 1 else os.path.basename(src)
+        dst = os.path.join(output_dir, dst_name)
         file_debug_dir = None
         if debug_dir is not None:
             file_debug_dir = os.path.join(debug_dir, os.path.splitext(os.path.basename(src))[0])
