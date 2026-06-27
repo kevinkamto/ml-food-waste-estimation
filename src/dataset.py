@@ -122,7 +122,7 @@ def get_transforms(mode: str = "train") -> transforms.Compose:
                 ),
                 transforms.RandomApply([transforms.GaussianBlur(kernel_size=3)], p=1 / 7),
                 transforms.RandomAdjustSharpness(sharpness_factor=2, p=1 / 7),
-                transforms.RandomAutocontrast(p=1 / 7),
+                transforms.RandomApply([transforms.ColorJitter(contrast=0.5)], p=1 / 7),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ]
