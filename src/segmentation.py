@@ -34,6 +34,7 @@ _NOISE_REMOVAL_KERNEL = 21  # morphological opening to remove small plate-surfac
 _PLATE_SAT_MAX = 25
 _PLATE_VAL_MIN = 150
 _PLATE_TEX_MAX = 12
+_MIN_FOOD_MASK_IOU = 0.1
 
 _SAM_MODEL_TYPE = "vit_b"
 _SAM_CHECKPOINT_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
@@ -105,6 +106,16 @@ def _close_mask_border(mask: np.ndarray, kernel_size: int = _MASK_CLOSE_KERNEL) 
     return closed[pad:-pad, pad:-pad] if pad > 0 else closed
 
 
+def _download_checkpoint(url: str, path: Path) -> None:
+    with urllib.request.urlopen(url) as resp:
+        total = int(resp.headers.get("Content-Length", 0))
+        with tqdm(total=total, unit="B", unit_scale=True, desc="SAM ViT-B checkpoint") as pbar, \
+             open(path, "wb") as f:
+            while chunk := resp.read(65536):
+                f.write(chunk)
+                pbar.update(len(chunk))
+
+
 def _get_sam_predictor() -> SamPredictor:
     """Lazy-load SAM ViT-B predictor, downloading the checkpoint on first use (~375 MB)."""
     global _sam_predictor
@@ -112,7 +123,7 @@ def _get_sam_predictor() -> SamPredictor:
         if not _SAM_CHECKPOINT_PATH.exists():
             _SAM_CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
             print(f"Downloading SAM checkpoint (~375 MB) to {_SAM_CHECKPOINT_PATH} ...")
-            urllib.request.urlretrieve(_SAM_CHECKPOINT_URL, str(_SAM_CHECKPOINT_PATH))
+            _download_checkpoint(_SAM_CHECKPOINT_URL, _SAM_CHECKPOINT_PATH)
         device = "cuda" if torch.cuda.is_available() else "cpu"
         sam = sam_model_registry[_SAM_MODEL_TYPE](checkpoint=str(_SAM_CHECKPOINT_PATH))
         sam.to(device)
@@ -167,8 +178,11 @@ def segment_image(
 
     scale = _OUT_SIZE / float(side)
     prompt_coords = _build_sam_prompt_points(w0, h0, pad_left, pad_top, scale)
+    predictor = _get_sam_predictor()
+    predictor.set_image(cv2.cvtColor(resized_bgr, cv2.COLOR_BGR2RGB))
     plate_mask = _detect_plate_mask(
         resized_bgr,
+        predictor=predictor,
         prompt_coords=prompt_coords,
         debug_dir=debug_dir,
         image_id=image_id,
@@ -186,11 +200,12 @@ def segment_image(
             ext=".jpg",
         )
 
-    food_hint = _build_food_hint_mask(resized_bgr, plate_mask)
+    food_hint = _build_food_hint_mask(resized_bgr, plate_mask, debug_dir=debug_dir, image_id=image_id)
     food_mask = _refine_food_mask_with_sam(
         resized_bgr,
         plate_mask,
         food_hint,
+        predictor=predictor,
         debug_dir=debug_dir,
         image_id=image_id,
     )
@@ -310,6 +325,7 @@ def _build_food_hint_mask(
     plate_surface = (
         inside & (s < _PLATE_SAT_MAX) & (v > _PLATE_VAL_MIN) & (texture_std < _PLATE_TEX_MAX)
     )
+    plate_surface = _remove_plate_noise(plate_surface)
     food_hint = inside & ~plate_surface
 
     if debug_dir is not None:
@@ -356,8 +372,9 @@ def _build_food_prompt_points(
     if len(food_locations) <= max_food_points:
         selected = food_locations
     else:
-        step = len(food_locations) / float(max_food_points)
-        selected = food_locations[(np.arange(max_food_points) * step).astype(int)]
+        rng = np.random.default_rng(seed=0)
+        indices = rng.choice(len(food_locations), size=max_food_points, replace=False)
+        selected = food_locations[indices]
 
     food_points = selected[:, ::-1].astype(np.float32)
 
@@ -384,6 +401,8 @@ def _choose_best_food_mask(masks: np.ndarray, food_hint: np.ndarray) -> np.ndarr
         if iou > best_iou:
             best_iou = iou
             best_mask = mask.astype(np.uint8) * 255
+    if best_iou < _MIN_FOOD_MASK_IOU:
+        return (food_hint > 0).astype(np.uint8) * 255
     return best_mask
 
 
@@ -391,6 +410,7 @@ def _refine_food_mask_with_sam(
     bgr: np.ndarray,
     plate_mask: np.ndarray,
     food_hint: np.ndarray,
+    predictor: SamPredictor,
     debug_dir: str | None = None,
     image_id: str | None = None,
 ) -> np.ndarray:
@@ -413,10 +433,6 @@ def _refine_food_mask_with_sam(
             as_bgr=True,
             ext=".jpg",
         )
-
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    predictor = _get_sam_predictor()
-    predictor.set_image(rgb)
 
     mask_input = cv2.resize(plate_mask, (256, 256), interpolation=cv2.INTER_NEAREST)
     mask_input = (mask_input > 128).astype(np.float32)[None, :, :]
@@ -463,6 +479,7 @@ def _refine_food_mask_with_sam(
 
 def _detect_plate_mask(
     bgr: np.ndarray,
+    predictor: SamPredictor,
     prompt_coords: np.ndarray | None = None,
     debug_dir: str | None = None,
     image_id: str | None = None,
@@ -497,10 +514,6 @@ def _detect_plate_mask(
         # first values are foreground points, last values are background points
         point_labels = np.array([1] * 5 + [0] * 4, dtype=np.int32)
 
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    predictor = _get_sam_predictor()
-    predictor.set_image(rgb)
-
     masks, scores, _ = predictor.predict(
         point_coords=prompt_coords,
         point_labels=point_labels,
@@ -525,17 +538,16 @@ def _detect_plate_mask(
             score_path = os.path.join(debug_dir, _debug_filename(image_id, 3, i * 3 + 3, f"sam_score_{i:02d}", ".txt"))
             with open(score_path, "w", encoding="utf-8") as score_file:
                 score_file.write(f"{score:.6f}\n")
-        if prompt_coords is not None:
-            _save_debug_step(
-                debug_dir,
-                image_id,
-                3,
-                50,
-                "prompt_overlay",
-                _draw_prompt_points(bgr, prompt_coords),
-                as_bgr=True,
-                ext=".jpg",
-            )
+        _save_debug_step(
+            debug_dir,
+            image_id,
+            3,
+            50,
+            "prompt_overlay",
+            _draw_prompt_points(bgr, prompt_coords),
+            as_bgr=True,
+            ext=".jpg",
+        )
 
     best = masks[int(np.argmax(scores))].astype(np.uint8) * 255
     closed = _close_mask_border(best)
@@ -566,8 +578,8 @@ def _normalize_plate(
 
     if debug_dir is not None:
         image_id = image_id or "image"
-        _save_debug_step(debug_dir, image_id, 4, 1, "food_mask", food.astype(np.uint8) * 255)
-        _save_debug_step(debug_dir, image_id, 4, 2, "food_mask_overlay", _overlay_mask(bgr, food.astype(np.uint8) * 255), as_bgr=True, ext=".jpg")
+        _save_debug_step(debug_dir, image_id, 4, 3, "food_mask", food.astype(np.uint8) * 255)
+        _save_debug_step(debug_dir, image_id, 4, 4, "food_mask_overlay", _overlay_mask(bgr, food.astype(np.uint8) * 255), as_bgr=True, ext=".jpg")
 
     result = np.zeros_like(bgr)
     result[inside] = bgr[inside]
@@ -588,6 +600,7 @@ def _batch_segment(input_dir: str, output_dir: str, debug_dir: str | None = None
     if debug_dir is not None:
         os.makedirs(debug_dir, exist_ok=True)
 
+    failed: list[tuple[str, str]] = []
     for src in tqdm(paths, desc="Segmenting"):
         rel = os.path.relpath(src, input_dir)
         parts = rel.split(os.sep)
@@ -599,7 +612,12 @@ def _batch_segment(input_dir: str, output_dir: str, debug_dir: str | None = None
         try:
             segment_image(src, dst, debug_dir=file_debug_dir)
         except Exception as exc:
-            print(f"WARN: skipping {src} -- {exc}")
+            failed.append((src, str(exc)))
+
+    if failed:
+        print(f"\n{len(failed)}/{len(paths)} images failed:")
+        for fp, err in failed:
+            print(f"  {fp}: {err}")
 
 
 def _cli() -> None:
