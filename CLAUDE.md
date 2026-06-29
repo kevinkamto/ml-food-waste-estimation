@@ -54,7 +54,7 @@ Single-task dual-stream EfficientNet-B0 with enhanced fusion:
 - **area_ratio**: scalar = non-black pixels in after_seg / non-black pixels in before_seg
 - **Regression head**: FC(3841->1024->512->1) + clamp(0, 1) -> consumption ratio r in [0,1]
 - **No classification head** (single-task design)
-- **Loss**: L1Loss (MAE)
+- **Loss**: HuberLoss(delta=0.1)
 - **Optimizer**: Adam, lr=0.0001
 - **Input**: Segmented images only (NOT raw images), background already removed
 
@@ -88,7 +88,7 @@ Single-task dual-stream EfficientNet-B0 with enhanced fusion:
 
 - Resize to 224x224
 - Normalize with ImageNet stats: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-- **Labels**: Normalize leftover weight to 0.0-1.0 using max weight in dataset
+- **Labels**: consumption_ratio = Weight_After / Weight_Before per sample; already in [0, 1], no dataset-wide normalization
 
 ---
 

@@ -88,6 +88,11 @@ def compute_class_weights(df: pd.DataFrame, n_bins: int = 10) -> torch.Tensor:
     return torch.tensor(weights, dtype=torch.float32)
 
 
+def _pixel_area(image_path: str) -> float:
+    arr = np.array(Image.open(image_path).convert("RGB"))
+    return float(np.any(arr > 0, axis=2).sum())
+
+
 def _seg_filename(raw_filename: str) -> str:
     # Segmented files are named {category}_{raw_filename}, e.g.
     # raw: 001_001_DSC_0059_bef.JPG -> segmented: 001_001_001_DSC_0059_bef.JPG

@@ -35,12 +35,12 @@ After  image (3,224,224) -> EfficientNet-B0 -> feat_after  (1280,)
               FC(3841->1024) + ReLU + Dropout(0.3)
               FC(1024->512)  + ReLU + Dropout(0.2)
                                     |
-                      FC(512->1) + Sigmoid
+                   FC(512->1) + clamp(0, 1)
                                     |
                     consumption_ratio r  in [0, 1]
 ```
 
-Both streams share EfficientNet-B0 weights (Siamese-style). Backbone is pretrained on ImageNet, frozen for the first 5 epochs, then fully unfrozen (LR reset to initial value on unfreeze).
+Both streams share EfficientNet-B0 weights (Siamese-style). Backbone is pretrained on ImageNet, frozen for the first 10 epochs, then fully unfrozen (LR reset to initial value on unfreeze).
 
 **area_ratio**: non-black pixel count of after image / before image -- gives the model an explicit visual coverage signal.
 
@@ -71,7 +71,7 @@ ml-food-waste-estimation/
 ├── src/
 │   ├── dataset.py                  # FoodWasteDataset, area_ratio, transforms
 │   ├── model.py                    # DualStreamEfficientNet (single-task)
-│   ├── train.py                    # 5-fold GroupKFold training loop
+│   ├── train.py                    # 10-fold outer + 5-fold inner GroupKFold training loop
 │   ├── inference.py                # CLI inference script
 │   └── utils.py                    # Metrics, seed fixing
 ├── checkpoints/                    # Best model per fold
@@ -108,7 +108,7 @@ The visual score column (1-7) in the metadata is a human observer rating and is 
 uv sync
 
 # Run scripts inside the environment
-uv run python src/train.py --folds 5 --epochs 100 --lr 0.0001 --batch_size 16
+uv run python src/train.py --folds 10 --epochs 100 --lr 0.0001 --batch_size 16
 ```
 
 ### Google Colab
@@ -133,18 +133,18 @@ After that, all relative paths (`data/`, `checkpoints/`, `results/`, `src/`) res
 
 Local (uv):
 ```bash
-uv run python src/train.py --folds 5 --epochs 100 --lr 0.0001 --batch_size 16
+uv run python src/train.py --folds 10 --epochs 100 --lr 0.0001 --batch_size 16
 ```
 
 Colab:
 ```bash
-python src/train.py --folds 5 --epochs 100 --lr 0.0001 --batch_size 16
+python src/train.py --folds 10 --epochs 100 --lr 0.0001 --batch_size 16
 ```
 
 Training details:
-- 5-fold GroupKFold (grouped by food category to prevent leakage)
+- 10-fold outer GroupKFold (gives 10% test split) + 5-fold inner (gives ~20% val), grouped by food category
 - WeightedRandomSampler with inverse-frequency bin weights (bimodal distribution)
-- ReduceLROnPlateau(factor=0.5, patience=5); LR reset when backbone unfreezes at epoch 6
+- ReduceLROnPlateau(factor=0.5, patience=5); scheduler and LR reset when backbone unfreezes at epoch 11
 - Early stopping: patience=20 epochs on val MAE
 - Random seeds fixed at 42 for Python, NumPy, PyTorch, and CUDA
 
@@ -196,7 +196,7 @@ Returns:
 }
 ```
 
-Ensemble inference (all 5 folds, averaged) is available via `notebooks/LeFoodSet_Leftovers_Inference.ipynb`.
+Ensemble inference (all 10 folds, averaged) is available via `notebooks/LeFoodSet_Leftovers_Inference.ipynb`.
 
 ---
 

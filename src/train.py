@@ -30,8 +30,8 @@ def train_fold(
     fold_n: int,
     checkpoint_dir: str,
     norm_params: dict,
-) -> tuple[float, float, pd.DataFrame]:
-    criterion = nn.L1Loss()
+) -> tuple[float, float, float, float, pd.DataFrame]:
+    criterion = nn.HuberLoss(delta=0.1)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6
     )
@@ -43,8 +43,11 @@ def train_fold(
     for epoch in range(1, epochs + 1):
         if epoch == frozen_epochs + 1:
             model.unfreeze_backbone()
-            # Reset only the backbone param group; head keeps its scheduler-tuned LR.
             optimizer.param_groups[1]["lr"] = optimizer.defaults["lr"]
+            # Reset scheduler so LR-reduction patience counts from the unfreeze point.
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6
+            )
 
         # Train
         model.train()
@@ -143,6 +146,7 @@ def train_fold(
     model.eval()
     test_preds: list[torch.Tensor] = []
     test_targets: list[torch.Tensor] = []
+    test_wb: list[torch.Tensor] = []
     with torch.no_grad():
         for batch in test_loader:
             before = batch["before"].to(device)
@@ -152,11 +156,20 @@ def train_fold(
             pred = model(before, after, area_ratio)
             test_preds.append(pred.cpu())
             test_targets.append(target.cpu())
+            test_wb.append(batch["weight_before"].float())
 
-    test_mae = compute_mae(torch.cat(test_preds), torch.cat(test_targets))
-    logger.info(f"Fold {fold_n} | Test MAE: {test_mae:.4f} (held-out)")
+    preds_t = torch.cat(test_preds)
+    targets_t = torch.cat(test_targets)
+    wb_t = torch.cat(test_wb)
+    test_mae = compute_mae(preds_t, targets_t)
+    test_gram_mae = compute_mae(preds_t * wb_t, targets_t * wb_t)
+    test_gram_rmse = compute_rmse(preds_t * wb_t, targets_t * wb_t)
+    logger.info(
+        f"Fold {fold_n} | Test MAE: {test_mae:.4f} | "
+        f"Gram MAE: {test_gram_mae:.2f}g | Gram RMSE: {test_gram_rmse:.2f}g (held-out)"
+    )
 
-    return best_val_mae, test_mae, pd.DataFrame(log_rows)
+    return best_val_mae, test_mae, test_gram_mae, test_gram_rmse, pd.DataFrame(log_rows)
 
 
 def main() -> None:
@@ -202,6 +215,8 @@ def main() -> None:
     fold_indices: dict = {}
     fold_val_maes: list[float] = []
     fold_test_maes: list[float] = []
+    fold_test_gram_maes: list[float] = []
+    fold_test_gram_rmses: list[float] = []
     all_fold_logs: list[pd.DataFrame] = []
 
     pin_memory = device.type == "cuda"
@@ -277,7 +292,7 @@ def main() -> None:
             lr=args.lr,
         )
 
-        best_val_mae, test_mae, log_df = train_fold(
+        best_val_mae, test_mae, test_gram_mae, test_gram_rmse, log_df = train_fold(
             model,
             train_loader,
             val_loader,
@@ -293,6 +308,8 @@ def main() -> None:
         )
         fold_val_maes.append(best_val_mae)
         fold_test_maes.append(test_mae)
+        fold_test_gram_maes.append(test_gram_mae)
+        fold_test_gram_rmses.append(test_gram_rmse)
         log_df["fold"] = fold_n
         all_fold_logs.append(log_df)
         log_df.to_csv(os.path.join(results_dir, f"fold_{fold_n}_log.csv"), index=False)
@@ -300,7 +317,12 @@ def main() -> None:
 
         # Partial save so results survive a mid-training crash
         with open(os.path.join(results_dir, "summary.json"), "w") as f:
-            json.dump({"fold_val_maes": fold_val_maes, "fold_test_maes": fold_test_maes}, f, indent=2)
+            json.dump({
+                "fold_val_maes": fold_val_maes,
+                "fold_test_maes": fold_test_maes,
+                "fold_test_gram_maes": fold_test_gram_maes,
+                "fold_test_gram_rmses": fold_test_gram_rmses,
+            }, f, indent=2)
 
     with open(os.path.join(results_dir, "fold_indices.json"), "w") as f:
         json.dump(fold_indices, f, indent=2)
@@ -312,8 +334,11 @@ def main() -> None:
     summary = {
         "fold_val_maes": fold_val_maes,
         "fold_test_maes": fold_test_maes,
+        "fold_test_gram_maes": fold_test_gram_maes,
+        "fold_test_gram_rmses": fold_test_gram_rmses,
         "mean_val_mae": float(np.mean(fold_val_maes)),
         "mean_test_mae": float(np.mean(fold_test_maes)),
+        "mean_test_gram_mae": float(np.mean(fold_test_gram_maes)),
         "std_test_mae": float(np.std(fold_test_maes)),
         "human_baseline_mae": 0.0926,
         "beats_baseline": float(np.mean(fold_test_maes)) < 0.0926,
