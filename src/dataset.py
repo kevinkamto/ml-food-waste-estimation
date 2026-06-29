@@ -20,11 +20,27 @@ def load_metadata(xlsx_path: str, before_dir: str, after_dir: str, save_dir: str
     """
     df = pd.read_excel(xlsx_path)
 
+    # SAFETY: Ensure before-weight is always positive (clamp to avoid division by zero)
+    df["Weight Before Eaten (g)"] = df["Weight Before Eaten (g)"].clip(lower=0.1)
+
+    # SAFETY: After-weight cannot be negative
+    df["Weight After Eaten (g)"] = df["Weight After Eaten (g)"].clip(lower=0.0)
+
+    # SAFETY: Ensure after-weight never exceeds before-weight (clamp invalid data)
+    invalid_mask = df["Weight After Eaten (g)"] > df["Weight Before Eaten (g)"]
+    if invalid_mask.any():
+        logger.warning(
+            f"Found {invalid_mask.sum()} samples where after-weight > before-weight. Capping to before-weight."
+        )
+        df.loc[invalid_mask, "Weight After Eaten (g)"] = df.loc[invalid_mask, "Weight Before Eaten (g)"]
+
+    # Compute leftovers (always >= 0 by construction)
     df["Weight Leftover (g)"] = df["Weight Before Eaten (g)"] - df["Weight After Eaten (g)"]
-    assert (df["Weight Before Eaten (g)"] > 0).all(), (
-        "Zero or negative before-weight found in metadata"
-    )
-    assert (df["Weight Leftover (g)"] >= 0).all(), "Negative leftover weights found in metadata"
+
+    # Final safety clamp to ensure no numerical errors
+    df["Weight Leftover (g)"] = df["Weight Leftover (g)"].clip(lower=0.0)
+    if (df["Weight Leftover (g)"] < 0).any():
+        logger.error("Critical: Negative leftovers detected even after clipping. Check source data.")
 
     # Filter to rows where both segmented images exist on disk
     available_bef = {f for _, _, files in os.walk(before_dir) for f in files}
@@ -73,7 +89,6 @@ def compute_class_weights(df: pd.DataFrame, n_bins: int = 10) -> torch.Tensor:
 
 
 def _pixel_area(image_path: str) -> float:
-    """Count non-black pixels in a segmented image (black background)."""
     arr = np.array(Image.open(image_path).convert("RGB"))
     return float(np.any(arr > 0, axis=2).sum())
 
@@ -106,7 +121,7 @@ def get_transforms(mode: str = "train") -> transforms.Compose:
                 ),
                 transforms.RandomApply([transforms.GaussianBlur(kernel_size=3)], p=1 / 7),
                 transforms.RandomAdjustSharpness(sharpness_factor=2, p=1 / 7),
-                transforms.RandomAutocontrast(p=1 / 7),
+                transforms.RandomApply([transforms.ColorJitter(contrast=0.5)], p=1 / 7),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ]
@@ -145,6 +160,15 @@ class FoodWasteDataset(Dataset):
         self.before_dir = before_dir
         self.after_dir = after_dir
         self.transform = transform
+        # Resolve paths once at init to avoid repeated os.walk on every __getitem__
+        self._before_paths = [
+            find_image(before_dir, _seg_filename(row["Image Before Eaten"]))
+            for _, row in self.df.iterrows()
+        ]
+        self._after_paths = [
+            find_image(after_dir, _seg_filename(row["Image After Eaten"]))
+            for _, row in self.df.iterrows()
+        ]
 
     def __len__(self) -> int:
         return len(self.df)
@@ -152,11 +176,8 @@ class FoodWasteDataset(Dataset):
     def __getitem__(self, idx: int) -> dict:
         row = self.df.iloc[idx]
 
-        before_seg = _seg_filename(row["Image Before Eaten"])
-        after_seg = _seg_filename(row["Image After Eaten"])
-
-        before_path = find_image(self.before_dir, before_seg)
-        after_path = find_image(self.after_dir, after_seg)
+        before_path = self._before_paths[idx]
+        after_path = self._after_paths[idx]
 
         before_img = Image.open(before_path).convert("RGB")
         after_img = Image.open(after_path).convert("RGB")

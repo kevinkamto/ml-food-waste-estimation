@@ -84,7 +84,7 @@ train_transform = Compose([
     RandomPadding(p=1/7),
     GaussianBlur(p=1/7),
     RandomAdjustSharpness(p=1/7),
-    RandomAutocontrast(p=1/7),
+    RandomApply([ColorJitter(contrast=0.5)], p=1/7),
     ToTensor(),
     Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
@@ -129,7 +129,7 @@ After  image (3,224,224) -> EfficientNet-B0 -> feat_after  (1280,)
               FC(3841->1024) + ReLU + Dropout(0.3)
               FC(1024->512)  + ReLU + Dropout(0.2)
                                     |
-                      FC(512->1) + Sigmoid
+                   FC(512->1) + clamp(0, 1)  [bias init: 0.4]
                                     |
                     consumption_ratio r  (0-1)
 ```
@@ -137,15 +137,15 @@ After  image (3,224,224) -> EfficientNet-B0 -> feat_after  (1280,)
 ### 4.2 Weight Sharing
 
 - Both streams share the same EfficientNet-B0 backbone (Siamese-style)
-- Pretrained on ImageNet; backbone is frozen for the first 5 epochs, then unfrozen
+- Pretrained on ImageNet; backbone is frozen for the first 10 epochs (`--frozen_epochs`), then unfrozen with scheduler reset
 
 ### 4.3 Loss Function
 
 ```python
-loss = HuberLoss(delta=0.1)(pred_ratio, true_ratio)
+loss = nn.HuberLoss(delta=0.1)(pred_ratio, true_ratio)
 ```
 
-Huber loss is less sensitive to outliers than MSE and does not compress gradients near 0 and 1 like MAE. Delta = 0.1 keeps it nearly MAE-shaped across the bimodal ratio distribution.
+Huber loss is less sensitive to outliers than MSE and does not compress gradients near 0 and 1 like pure MAE. Delta = 0.1 keeps it nearly MAE-shaped across the bimodal ratio distribution.
 
 ---
 
@@ -154,9 +154,10 @@ Huber loss is less sensitive to outliers than MSE and does not compress gradient
 ### 5.1 Cross Validation
 
 ```
-- 5-fold GroupKFold grouped by food category
-  -- prevents the same food type appearing in both train and val within a fold
-- No separate test split; report val MAE per fold
+- 10-fold outer GroupKFold grouped by food category (1/10 test, 9/10 trainval)
+- 5-fold inner GroupKFold on trainval (first split: ~20% val, ~70% train)
+  -> final split per fold: 70% train / 20% val / 10% test
+- prevents the same food type appearing in both train and test within a fold
 - Save fold indices to results/fold_indices.json
 - Fix seeds: random=42, numpy=42, torch=42, cuda deterministic=True
 ```
@@ -176,7 +177,7 @@ sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights))
 ```
 For each fold:
     1. Initialize fresh model (EfficientNet-B0 pretrained)
-    2. Freeze backbone, train fusion + head for 5 epochs
+    2. Freeze backbone, train fusion + head for 10 epochs (--frozen_epochs)
     3. Unfreeze all, train with Adam lr=0.0001
     4. ReduceLROnPlateau: factor=0.5, patience=5, min_lr=1e-6
     5. EarlyStopping: patience=20 epochs on val MAE
@@ -211,7 +212,66 @@ After all folds:
 
 ---
 
-## 6. Inference Pipeline (`src/inference.py` + `notebooks/LeFoodSet_Leftovers_Inference.ipynb`)
+## 6. Segmentation Pipeline (`src/segmentation.py`)
+
+Converts a raw food photo into the ground-truth segmented format required by the model.
+
+### 6.1 Output Format
+
+```
+black background (outside plate) | pure white plate area | food at original colors
+```
+
+The model was trained on images in this exact format. Inference on raw images must go through
+this pipeline to produce compatible inputs.
+
+### 6.2 Algorithm
+
+**Stage 1 -- Plate boundary detection (SAM ViT-B)**
+1. Pad raw image (shorter dimension) to square with black pixels
+2. Resize to 800x800
+3. Run SAM ViT-B with explicit point prompts:
+   - Foreground point: center of frame (plate is always centered, fixed hospital camera)
+   - Background points: four corners at 10% inset (always the checkered mat)
+4. Select the highest-scoring mask from SAM's three candidates
+5. Morphological closing (30px kernel) to fill small gaps in the mask
+
+**Stage 2 -- Plate normalization (HSV + local texture)**
+6. Within the SAM mask, classify each pixel using HSV and local texture std (7x7 window):
+   - Plate surface: S < 40 AND V > 150 AND texture_std < 12 -> (255, 255, 255)
+   - Food: all other pixels inside the mask -> original RGB preserved
+7. Outside the mask -> (0, 0, 0)
+
+The texture criterion prevents white/cream foods (rice, porridge) from being painted white:
+smooth plate surface has local std ~3-8; rice grain boundaries have local std ~10-20.
+
+### 6.3 Dish Shape Handling
+
+SAM with point prompts is shape-agnostic: it detects the plate boundary directly from the
+image content without any geometric assumption. Both dish types in the dataset are handled:
+- **Round circular plate** (most categories)
+- **Large rounded-rectangle plate** (cat 007, some cat 033)
+
+### 6.4 CLI Usage
+
+```bash
+# Single image
+python src/segmentation.py --input data/raw/data_before/001/001_001_DSC_0059_bef.JPG \
+    --output results/seg_test.jpg
+
+# Batch (walks subdirectories, writes flat into output_dir)
+python src/segmentation.py --input_dir data/raw/data_before --output_dir data/segmented/data_before
+```
+
+### 6.5 Known Limitations
+
+- SAM assumes the dish occupies the center of the frame. Only valid for the fixed hospital cafeteria camera setup; images from a different angle may require different prompts.
+- White/cream foods (rice, rice porridge, white tofu) with very smooth texture may still be partially normalized to white if their local texture std falls below the threshold of 12. This is the documented hard case from the paper.
+- SAM checkpoint (~375 MB, ViT-B) is downloaded automatically to `~/.cache/segment_anything/` on first use. Subsequent runs use the cached file. On Google Colab, this cache does not persist between sessions -- add the download step to the Colab setup cell.
+
+---
+
+## 7. Inference Pipeline (`src/inference.py` + `notebooks/LeFoodSet_Leftovers_Inference.ipynb`)
 
 ### 6.1 Single Prediction
 
@@ -244,7 +304,8 @@ def predict(before_path, after_path, checkpoint_path, weight_before_g=None):
 | `src/model.py`                                   | Dual-stream model definition           | Exists         |
 | `src/train.py`                                   | Training loop with GroupKFold          | Exists         |
 | `src/utils.py`                                   | Metrics, helpers, seed fixing          | Exists         |
-| `src/inference.py`                               | CLI inference script                   | Exists         |
+| `src/inference.py`                               | CLI inference script (+ --raw flag)    | Exists         |
+| `src/segmentation.py`                            | Auto-segmentation: raw -> 800x800      | Exists         |
 | `checkpoints/`                                   | Saved model weights per fold           | Auto-generated |
 | `results/summary.json`                           | Final metrics across all folds         | Auto-generated |
 | `results/all_folds_log.csv`                      | Combined per-epoch training log        | Auto-generated |
@@ -277,7 +338,7 @@ def predict(before_path, after_path, checkpoint_path, weight_before_g=None):
 
 The system is working correctly when:
 
-1. `LeFoodSet_Leftovers_Training.ipynb` runs all 5 folds without interruption. On Colab, Drive is mounted and the working directory is set to the project folder before execution, so checkpoints persist automatically.
+1. `LeFoodSet_Leftovers_Training.ipynb` runs all 10 folds without interruption. On Colab, Drive is mounted and the working directory is set to the project folder before execution, so checkpoints persist automatically.
 2. Final mean MAE across folds is < 0.0926
 3. `LeFoodSet_Leftovers_Inference.ipynb` accepts two image uploads and an optional serving weight, and returns a consumption ratio and predicted grams within 3 seconds
 4. Results are reproducible: running training twice with the same seeds produces identical fold metrics
