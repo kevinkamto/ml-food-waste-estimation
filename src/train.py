@@ -27,6 +27,7 @@ def train_fold(
     epochs: int,
     patience: int,
     frozen_epochs: int,
+    pretrained: bool,
     fold_n: int,
     checkpoint_dir: str,
     norm_params: dict,
@@ -125,6 +126,7 @@ def train_fold(
                     "optimizer_state_dict": optimizer.state_dict(),
                     "val_mae": best_val_mae,
                     "normalization_params": norm_params,
+                    "pretrained": pretrained,
                 },
                 os.path.join(checkpoint_dir, f"fold_{fold_n}_best.pth"),
             )
@@ -316,6 +318,7 @@ def main() -> None:
             args.epochs,
             args.patience,
             effective_frozen_epochs,
+            args.pretrained,
             fold_n,
             checkpoint_dir,
             norm_params,
@@ -332,6 +335,7 @@ def main() -> None:
         # Partial save so results survive a mid-training crash
         with open(os.path.join(results_dir, "summary.json"), "w") as f:
             json.dump({
+                "pretrained": args.pretrained,
                 "fold_val_maes": fold_val_maes,
                 "fold_test_maes": fold_test_maes,
                 "fold_test_gram_maes": fold_test_gram_maes,
@@ -346,6 +350,7 @@ def main() -> None:
     )
 
     summary = {
+        "pretrained": args.pretrained,
         "fold_val_maes": fold_val_maes,
         "fold_test_maes": fold_test_maes,
         "fold_test_gram_maes": fold_test_gram_maes,
