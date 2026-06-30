@@ -7,6 +7,10 @@ Single-task deep learning system that estimates food consumption ratio from befo
 
 Dataset: **LeFoodSet** -- 524 usable samples across 34 food categories (678 rows in Excel; 154 lack segmented images and are skipped automatically).
 
+<p align="center">
+  <img src="assets/readme/pipeline_overview.png" alt="Pipeline overview: raw photos, SAM segmentation, dual-stream EfficientNet-B0, consumption ratio output" width="100%">
+</p>
+
 ---
 
 ## Overview
@@ -22,25 +26,13 @@ Target: beat the human visual observer baseline of **MAE = 0.0926** on the consu
 
 ## Architecture
 
-Single-task dual-stream EfficientNet-B0 with enhanced fusion:
+Single-task dual-stream EfficientNet-B0 with enhanced fusion. Both streams share EfficientNet-B0 weights (Siamese-style).
 
-```
-Before image (3,224,224) -> EfficientNet-B0 -> feat_before (1280,)
-After  image (3,224,224) -> EfficientNet-B0 -> feat_after  (1280,)
-                                    |
-            |feat_before - feat_after| -> diff (1280,)
-                                    |
-  concat([feat_before, feat_after, diff, area_ratio]) -> (3841,)
-                                    |
-              FC(3841->1024) + ReLU + Dropout(0.3)
-              FC(1024->512)  + ReLU + Dropout(0.2)
-                                    |
-                   FC(512->1) + clamp(0, 1)
-                                    |
-                    consumption_ratio r  in [0, 1]
-```
+<p align="center">
+  <img src="assets/readme/architecture.png" alt="Dual-stream EfficientNet-B0 architecture diagram" width="85%">
+</p>
 
-Both streams share EfficientNet-B0 weights (Siamese-style). Backbone trains from random initialization by default (`--no-pretrained`); pass `--pretrained` to fine-tune from ImageNet weights instead, in which case the backbone is frozen for the first 10 epochs then fully unfrozen (LR reset to initial value on unfreeze). The frozen warm-up is skipped automatically when training from scratch.
+The backbone trains from random initialization by default (`--no-pretrained`); pass `--pretrained` to fine-tune from ImageNet weights instead, in which case the backbone is frozen for the first 10 epochs then fully unfrozen (LR reset to initial value on unfreeze). The frozen warm-up is skipped automatically when training from scratch.
 
 **area_ratio**: non-black pixel count of after image / before image -- gives the model an explicit visual coverage signal.
 
@@ -95,6 +87,12 @@ ml-food-waste-estimation/
 **Important**: Always use segmented images as input. Never use raw images.
 
 The visual score column (1-7) in the metadata is a human observer rating and is **not** the training target.
+
+### Sample pair
+
+<p align="center">
+  <img src="assets/readme/sample_pipeline.png" alt="Raw and segmented before/after sample pair" width="75%">
+</p>
 
 ---
 
@@ -231,6 +229,12 @@ Ensemble inference (all 10 folds, averaged) is available via `notebooks/LeFoodSe
 | RMSE (consumption ratio) | minimize | N/A |
 
 Results are aggregated in `results/summary.json` after all folds complete.
+
+<p align="center">
+  <img src="assets/readme/training_results.png" alt="Per-fold test MAE and validation MAE curves" width="100%">
+</p>
+
+*Example run shown above (`results/fold_mae.png`, regenerated each training run); your own numbers will differ.*
 
 ---
 
